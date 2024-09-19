@@ -24,18 +24,42 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-name: "cnn"
-platform: "pytorch_libtorch"
-max_batch_size : 0
-input [
-  {
-    name: "input__0"
-    data_type: TYPE_FP32
-  }
-]
-output [
-  {
-    name: "output__0"
-    data_type: TYPE_FP32
-  }
-]
+import numpy as np
+import tritonclient.http as httpclient
+from PIL import Image
+from torchvision import transforms
+from tritonclient.utils import triton_to_np_dtype
+
+
+# preprocessing function
+def cnn_preprocess(img_path="cat.2001.jpg"):
+    img = Image.open(img_path)
+    preprocess = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor()
+        ]
+    )
+    return preprocess(img).numpy()
+
+def softmax(logits):
+    exp_logits = np.exp(logits)
+    return exp_logits/np.sum(exp_logits)
+
+
+transformed_img = cnn_preprocess()
+
+# Setting up client
+client = httpclient.InferenceServerClient(url="localhost:8000")
+
+inputs = httpclient.InferInput("input__0", transformed_img.shape, datatype="FP32")
+inputs.set_data_from_numpy(transformed_img, binary_data=True)
+
+outputs = httpclient.InferRequestedOutput(
+    "output__0", binary_data=True, class_count=2
+)
+
+# Querying the server
+results = client.infer(model_name="cnn", inputs=[inputs], outputs=[outputs])
+inference_output = results.as_numpy("output__0")
+print(inference_output)
